@@ -33,7 +33,8 @@ $NOMOD51
 ; The code is designed for multirotor applications, running damped light mode
 ;
 ; The input signal can be Normal (1-2ms), OneShot125 (125-250us), OneShot42 (41.7-83.3us) or Multishot (5-25us) at rates as high as allowed by the format.
-; The code autodetects normal, OneShot125, Oneshot42 or Multishot.
+; Three Dshot signal rates are also supported, Dshot150, Dshot300 and Dshot600. A 48MHz MCU is required for Dshot600.
+; The code autodetects normal, OneShot125, Oneshot42, Multishot or Dshot.
 ;
 ; The first lines of the software must be modified according to the chosen environment:
 ; ESCNO EQU "ESC"
@@ -55,9 +56,12 @@ $NOMOD51
 ; - Rev16.3 Implemented programmable temperature protection
 ;           Improved protection of bootloader and generally reduced risk of flash corruption
 ;           Some small changes for improved sync hold
-; - Rev16.35 Changed Defaults
 ; - Rev16.4 Fixed bug where bootloader operation could be blocked by a defective "eeprom" signature
-;
+; - Rev16.5 Added support for DShot150, DShot300 and DShot600
+; -Rev16.51 (cturn) Customized Default Values
+;	    Added selectedable startup tones, via the Beacon Delay config option
+;	    Added custom beacon tone, should be easier to hear & not heat up motors.
+; -Rev16.52 Fix for 32khz pwm rate Multishot Throttle Calibration bug.
 ;
 ;**** **** **** **** ****
 ; Minimum 8K Bytes of In-System Self-Programmable Flash
@@ -68,6 +72,8 @@ $NOMOD51
 ; Although 24/48 are used in the code, the exact clock frequencies are 24.5MHz or 49.0 MHz
 ; Timer 0 (41.67ns counts) always counts up and is used for
 ; - RC pulse measurement
+; Timer 1 (41.67ns counts) always counts up and is used for
+; - DShot frame sync detection
 ; Timer 2 (500ns counts) always counts up and is used for
 ; - RC pulse timeout counts and commutation times
 ; Timer 3 (500ns counts) always counts up and is used for
@@ -112,6 +118,9 @@ J_			EQU 10	; L2 L1 L0 RC CC MB MC MA    X  X  Cc Bc Ac Cp Bp Ap	LEDs
 K_			EQU 11	; X  X  MC X  MB CC MA RC    X  X  Ap Bp Cp Cc Bc Ac	Com fets inverted
 L_			EQU 12	; X  X  RC X  CC MA MB MC    X  X  Ac Bc Cc Ap Bp Cp
 M_			EQU 13	; MA MC CC MB RC L0 X  X     X  Cc Bc Ac Cp Bp Ap X	Inverted LED
+N_			EQU 14	; X  X  RC X  MC MB MA CC    X  X  Cc Cp Bc Bp Ac Ap
+O_			EQU 15	; X  X  RC X  CC MA MC MB    X  X  Cc Cp Bc Bp Ac Ap	Like D, but low side pwm and 1S flag set
+P_			EQU 16	; X  X  RC MA CC MB MC X     X  Cc Bc Ac Cp Bp Ap X
 
 
 ;**** **** **** **** ****
@@ -129,6 +138,9 @@ M_			EQU 13	; MA MC CC MB RC L0 X  X     X  Cc Bc Ac Cp Bp Ap X	Inverted LED
 ;ESCNO EQU K_
 ;ESCNO EQU L_
 ;ESCNO EQU M_
+;ESCNO EQU N_
+;ESCNO EQU O_
+;ESCNO EQU P_
 
 ;**** **** **** **** ****
 ; Select the MCU type (or unselect for use with external batch compile file)
@@ -136,7 +148,7 @@ M_			EQU 13	; MA MC CC MB RC L0 X  X     X  Cc Bc Ac Cp Bp Ap X	Inverted LED
 
 ;**** **** **** **** ****
 ; Select the fet deadtime (or unselect for use with external batch compile file)
-;FETON_DELAY EQU 40	; 20.4ns per step
+;FETON_DELAY EQU 10	; 20.4ns per step
 
 
 ;**** **** **** **** ****
@@ -193,6 +205,19 @@ IF ESCNO == M_
 $include (M.inc)	; Select pinout M
 ENDIF
 
+IF ESCNO == N_
+$include (N.inc)	; Select pinout N
+ENDIF
+
+IF ESCNO == O_
+$include (O.inc)	; Select pinout O
+ENDIF
+
+IF ESCNO == P_
+$include (P.inc)	; Select pinout P
+ENDIF
+
+
 ;**** **** **** **** ****
 ; Programming defaults
 ;
@@ -200,16 +225,16 @@ DEFAULT_PGM_STARTUP_PWR 				EQU 5 	; 1=0.031 2=0.047 3=0.063 4=0.094 5=0.125 6=0
 DEFAULT_PGM_COMM_TIMING				EQU 3 	; 1=Low 		2=MediumLow 	3=Medium 		4=MediumHigh 	5=High
 DEFAULT_PGM_DEMAG_COMP 				EQU 3 	; 1=Disabled	2=Low		3=High
 DEFAULT_PGM_DIRECTION				EQU 1 	; 1=Normal 	2=Reversed	3=Bidir		4=Bidir rev
-DEFAULT_PGM_BEEP_STRENGTH			EQU 80	; Beep strength
+DEFAULT_PGM_BEEP_STRENGTH			EQU 91	; Beep strength
 DEFAULT_PGM_BEACON_STRENGTH			EQU 80	; Beacon strength
-DEFAULT_PGM_BEACON_DELAY				EQU 4 	; 1=1m		2=2m			3=5m			4=10m		5=Infinite
+DEFAULT_PGM_BEACON_DELAY				EQU 3 	; 1=1m		2=2m			3=5m			4=10m		5=Infinite
 
 ; COMMON
 DEFAULT_PGM_ENABLE_TX_PROGRAM 		EQU 1 	; 1=Enabled 	0=Disabled
 DEFAULT_PGM_MIN_THROTTLE				EQU 10	; 4*10+1000=1040
 DEFAULT_PGM_MAX_THROTTLE				EQU 240	; 4*240+1000=1960
 DEFAULT_PGM_CENTER_THROTTLE			EQU 125	; 4*125+1000=1500 (used in bidirectional mode)
-DEFAULT_PGM_ENABLE_TEMP_PROT	 		EQU 7 	; 0=Disabled	1=80C	2=90C	3=100C	4=110C	5=120C	6=130C	7=140C
+DEFAULT_PGM_ENABLE_TEMP_PROT	 		EQU 6 	; 0=Disabled	1=80C	2=90C	3=100C	4=110C	5=120C	6=130C	7=140C
 DEFAULT_PGM_ENABLE_POWER_PROT 		EQU 1 	; 1=Enabled 	0=Disabled
 DEFAULT_PGM_BRAKE_ON_STOP	 		EQU 1 	; 1=Enabled 	0=Disabled
 DEFAULT_PGM_LED_CONTROL	 			EQU 1 	; Byte for LED control. 2bits per LED, 0=Off, 1=On
@@ -237,7 +262,7 @@ Rcp_Timeout_Cntd:			DS	1		; RC pulse timeout counter (decrementing)
 
 
 Flags0:					DS	1    	; State flags. Reset upon init_start
-T3_PENDING				EQU 	0		; Timer3 pending flag
+T3_PENDING				EQU 	0		; Timer 3 pending flag
 DEMAG_DETECTED				EQU 	1		; Set when excessive demag time is detected
 DEMAG_CUT_POWER			EQU 	2		; Set when demag compensation cuts power
 COMP_TIMED_OUT				EQU 	3		; Set when comparator reading timed out
@@ -253,7 +278,7 @@ INITIAL_RUN_PHASE			EQU	1		; Set when in initial run phase, before synchronized 
 MOTOR_STARTED				EQU 	2		; Set when motor is started
 DIR_CHANGE_BRAKE			EQU 	3		; Set when braking before direction change
 HIGH_RPM					EQU 	4		; Set when motor rpm is high (Comm_Period4x_H less than 2)
-;						EQU 	5	
+;						EQU 	5
 ;						EQU 	6	
 ;						EQU 	7	
 
@@ -262,20 +287,20 @@ RCP_UPDATED				EQU 	0		; New RC pulse length value available
 RCP_ONESHOT125				EQU 	1		; RC pulse input is OneShot125 (125-250us)
 RCP_ONESHOT42				EQU 	2		; RC pulse input is OneShot42 (41.67-83us)
 RCP_MULTISHOT				EQU 	3		; RC pulse input is Multishot (5-25us)
-RCP_DIR_REV				EQU 	4		; RC pulse direction in bidirectional mode
-RCP_FULL_RANGE				EQU 	5		; When set full input signal range is used (1000-2000us) and stored calibration values are ignored
-;						EQU 	6	
+RCP_DSHOT					EQU 	4		; RC pulse input is digital shot
+RCP_DIR_REV				EQU 	5		; RC pulse direction in bidirectional mode
+RCP_FULL_RANGE				EQU 	6		; When set full input signal range is used (1000-2000us) and stored calibration values are ignored
 ;						EQU 	7	
 
-Flags3:					DS	1		; State flags. NOT reset upon init_start
-PGM_DIR_REV				EQU 	0		; Programmed direction. 0=normal, 1=reversed
-PGM_BIDIR_REV				EQU 	1		; Programmed bidirectional direction. 0=normal, 1=reversed
-PGM_BIDIR					EQU 	2		; Programmed bidirectional operation. 0=normal, 1=bidirectional
-;						EQU 	3
-;						EQU 	4	
-;						EQU 	5	
-;						EQU 	6	
-;						EQU 	7	
+Flags3:					DS	1			; State flags. NOT reset upon init_start
+PGM_DIR_REV			EQU 	0		; Programmed direction. 0=normal, 1=reversed
+PGM_BIDIR_REV		EQU 	1		; Programmed bidirectional direction. 0=normal, 1=reversed
+PGM_BIDIR				EQU 	2		; Programmed bidirectional operation. 0=normal, 1=bidirectional
+FET_SWAP				EQU 	3		; Flipped on/off during Beep Routine.		
+TONE_WAVE				EQU 	4			
+TONE_DIR				EQU 	5			
+CZ_TONES				EQU 	6	
+MUTE						EQU 	7	
 
 
 ;**** **** **** **** ****
@@ -303,23 +328,23 @@ Low_Rpm_Pwr_Slope:			DS	1		; Sets the slope of power increase for low rpms
 
 Timer0_X:					DS	1		; Timer 0 extended byte
 Timer2_X:					DS	1		; Timer 2 extended byte
-Prev_Comm_L:				DS	1		; Previous commutation timer3 timestamp (lo byte)
-Prev_Comm_H:				DS	1		; Previous commutation timer3 timestamp (hi byte)
-Prev_Comm_X:				DS	1		; Previous commutation timer3 timestamp (ext byte)
-Prev_Prev_Comm_L:			DS	1		; Pre-previous commutation timer3 timestamp (lo byte)
-Prev_Prev_Comm_H:			DS	1		; Pre-previous commutation timer3 timestamp (hi byte)
-Comm_Period4x_L:			DS	1		; Timer3 counts between the last 4 commutations (lo byte)
-Comm_Period4x_H:			DS	1		; Timer3 counts between the last 4 commutations (hi byte)
+Prev_Comm_L:				DS	1		; Previous commutation timer 3 timestamp (lo byte)
+Prev_Comm_H:				DS	1		; Previous commutation timer 3 timestamp (hi byte)
+Prev_Comm_X:				DS	1		; Previous commutation timer 3 timestamp (ext byte)
+Prev_Prev_Comm_L:			DS	1		; Pre-previous commutation timer 3 timestamp (lo byte)
+Prev_Prev_Comm_H:			DS	1		; Pre-previous commutation timer 3 timestamp (hi byte)
+Comm_Period4x_L:			DS	1		; Timer 3 counts between the last 4 commutations (lo byte)
+Comm_Period4x_H:			DS	1		; Timer 3 counts between the last 4 commutations (hi byte)
 Comparator_Read_Cnt: 		DS	1		; Number of comparator reads done
 
-Wt_Adv_Start_L:			DS	1		; Timer3 start point for commutation advance timing (lo byte)
-Wt_Adv_Start_H:			DS	1		; Timer3 start point for commutation advance timing (hi byte)
-Wt_Zc_Scan_Start_L:			DS	1		; Timer3 start point from commutation to zero cross scan (lo byte)
-Wt_Zc_Scan_Start_H:			DS	1		; Timer3 start point from commutation to zero cross scan (hi byte)
-Wt_Zc_Tout_Start_L:			DS	1		; Timer3 start point for zero cross scan timeout (lo byte)
-Wt_Zc_Tout_Start_H:			DS	1		; Timer3 start point for zero cross scan timeout (hi byte)
-Wt_Comm_Start_L:			DS	1		; Timer3 start point from zero cross to commutation (lo byte)
-Wt_Comm_Start_H:			DS	1		; Timer3 start point from zero cross to commutation (hi byte)
+Wt_Adv_Start_L:			DS	1		; Timer 3 start point for commutation advance timing (lo byte)
+Wt_Adv_Start_H:			DS	1		; Timer 3 start point for commutation advance timing (hi byte)
+Wt_Zc_Scan_Start_L:			DS	1		; Timer 3 start point from commutation to zero cross scan (lo byte)
+Wt_Zc_Scan_Start_H:			DS	1		; Timer 3 start point from commutation to zero cross scan (hi byte)
+Wt_Zc_Tout_Start_L:			DS	1		; Timer 3 start point for zero cross scan timeout (lo byte)
+Wt_Zc_Tout_Start_H:			DS	1		; Timer 3 start point for zero cross scan timeout (hi byte)
+Wt_Comm_Start_L:			DS	1		; Timer 3 start point from zero cross to commutation (lo byte)
+Wt_Comm_Start_H:			DS	1		; Timer 3 start point from zero cross to commutation (hi byte)
 
 New_Rcp:					DS	1		; New RC pulse value in pca counts
 Rcp_Stop_Cnt:				DS	1		; Counter for RC pulses below stop value
@@ -351,6 +376,12 @@ Flash_Key_1:				DS	1		; Flash key one
 Flash_Key_2:				DS	1		; Flash key two
 
 Temp_Prot_Limit:			DS	1		; Temperature protection limit
+
+DShot_Pwm_Thr:				DS	1		; DShot pulse width threshold value
+DShot_Timer_Preset:			DS	1		; DShot timer preset for frame sync detection
+DShot_Frame_Start_L:		DS	1		; DShot frame start timestamp (lo byte)
+DShot_Frame_Start_H:		DS	1		; DShot frame start timestamp (hi byte)
+DShot_Frame_Length_Thr:		DS	1		; DShot frame length criteria (in units of 4 timer 2 ticks)
 
 ; Indirect addressing data segment. The variables below must be in this sequence
 ISEG AT 080h					
@@ -399,13 +430,12 @@ Pgm_Startup_Pwr_Decoded:		DS	1		; Programmed startup power decoded
 
 ; Indirect addressing data segment
 ISEG AT 0D0h					
-Tag_Temporary_Storage:		DS	48		; Temporary storage for tags when updating "Eeprom"
-
+Temp_Storage:				DS	48		; Temporary storage
 
 ;**** **** **** **** ****
 CSEG AT 1A00h            ; "Eeprom" segment
 EEPROM_FW_MAIN_REVISION		EQU	16		; Main revision of the firmware
-EEPROM_FW_SUB_REVISION		EQU	45		; Sub revision of the firmware
+EEPROM_FW_SUB_REVISION		EQU	51		; Sub revision of the firmware
 EEPROM_LAYOUT_REVISION		EQU	33		; Revision of the EEPROM layout
 
 Eep_FW_Main_Revision:		DB	EEPROM_FW_MAIN_REVISION			; EEPROM firmware main revision number
@@ -454,7 +484,7 @@ Eep_Pgm_LED_Control:		DB	DEFAULT_PGM_LED_CONTROL			; EEPROM copy of programmed L
 Eep_Dummy:				DB	0FFh							; EEPROM address for safety reason
 
 CSEG AT 1A60h
-Eep_Name:					DB	"                "				; Name tag (16 Bytes)
+Eep_Name:					DB	"16.51_StartTones"				; Name tag (16 Bytes
 
 ;**** **** **** **** ****
 Interrupt_Table_Definition		; SiLabs interrupts
@@ -468,14 +498,13 @@ STARTUP_POWER_TABLE:  	DB 	04h, 06h, 08h, 0Ch, 10h, 18h, 20h, 30h, 40h, 60h, 80h
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;
-; Timer0 interrupt routine
+; Timer 0 interrupt routine
 ;
 ; No assumptions
 ;
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 IF MCU_48MHZ == 1
 t0_int:
-	clr	TCON_TF0		; Clear interrupt flag
 	inc	Timer0_X
 	reti
 ENDIF
@@ -483,7 +512,313 @@ ENDIF
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;
-; Timer2 interrupt routine
+; Timer 1 interrupt routine
+;
+; No assumptions
+;
+;**** **** **** **** **** **** **** **** **** **** **** **** ****
+t1_int:
+	clr 	IE_EA
+	clr	IE_EX0			; Disable int0 interrupts
+	anl	EIE1, #0EFh		; Disable pca interrupts
+	clr	TCON_TR1			; Stop timer 1
+	mov	TL1, DShot_Timer_Preset	; Reset sync timer
+	push	PSW
+	setb	PSW.3			; Select register bank 1 for this interrupt
+	push	ACC
+	push	B				; Will be pop'ed by int0 exit
+	clr	TMR2CN0_TR2		; Timer 2 disabled
+	mov	Temp1, TMR2L		; Read timer value
+	mov	Temp2, TMR2H
+	setb	TMR2CN0_TR2		; Timer 2 enabled
+	setb	IE_EA
+	; Reset timer 1
+	mov	TL0, #0
+	; Check frame time length
+	clr	C
+	mov	A, Temp1
+	subb	A, DShot_Frame_Start_L
+	mov	Temp1, A
+	mov	A, Temp2
+	subb	A, DShot_Frame_Start_H
+	mov	Temp2, A
+	; Divide by 2 (or 4 for 48MHz). Unit is then us
+	clr	C
+	mov	A, Temp2
+	rrc	A
+	mov	Temp2, A
+	mov	A, Temp1
+	rrc	A
+	mov	Temp1, A
+	mov	A, Clock_Set_At_48MHz
+	jz	t1_int_frame_time_scaled
+
+	clr	C
+	mov	A, Temp2
+	rrc	A
+	mov	Temp2, A
+	mov	A, Temp1
+	rrc	A
+	mov	Temp1, A
+
+t1_int_frame_time_scaled:
+	mov	A, Temp2
+	jnz	t1_int_msb_fail	; Frame too long
+	mov	A, Temp1
+	subb	A, DShot_Frame_Length_Thr
+	jc	t1_int_msb_fail	; Frame too short
+	subb	A, DShot_Frame_Length_Thr
+	jnc	t1_int_msb_fail	; Frame too long
+
+	; Check that correct number of pulses is received
+	mov	A, DPL			; Read current pointer
+	cjne	A, #16, t1_int_msb_fail
+
+	; Decode transmitted data
+	mov	Temp5, #0			; Reset timestamp
+	mov	Temp4, #0			; High byte of receive buffer
+	mov	Temp3, #0			; Low byte of receive buffer
+	mov	Temp2, #8			; Number of bits per byte
+	mov	DPTR, #0			; Set pointer
+	mov	Temp1, DShot_Pwm_Thr; DShot pulse width criteria
+	mov	A, Clock_Set_At_48MHz
+	jnz	t1_int_decode
+
+	clr	C
+	mov	A, Temp1			; Scale pulse width criteria
+	rrc	A
+	mov	Temp1, A
+
+t1_int_decode:
+	ajmp	t1_int_decode_msb
+
+t1_int_msb_fail:
+	mov	DPTR, #0		 	; Set pointer to start
+	setb	IE_EX0			; Enable int0 interrupts
+	setb	IE_EX1			; Enable int1 interrupts
+	ajmp int0_int_outside_range
+
+t1_int_decode_msb:
+	; Decode DShot data Msb. Use more code space to save time (by not usinng loop)
+	Decode_DShot_2Msb
+	Decode_DShot_2Msb
+	Decode_DShot_2Msb
+	Decode_DShot_2Msb
+	ajmp	t1_int_decode_lsb
+
+t1_int_lsb_fail:
+	mov	DPTR, #0		 	; Set pointer to start
+	setb	IE_EX0			; Enable int0 interrupts
+	setb	IE_EX1			; Enable int1 interrupts
+	ajmp int0_int_outside_range
+
+t1_int_decode_lsb:
+	; Decode DShot data Lsb
+	Decode_DShot_2Lsb
+	Decode_DShot_2Lsb
+	Decode_DShot_2Lsb
+	Decode_DShot_2Lsb
+	; XOR check (in inverted data, which is ok)
+	mov	A, Temp4
+	swap	A
+	xrl	A, Temp4
+	xrl	A, Temp3
+	anl	A, #0F0h
+	mov	Temp2, A
+	mov	A, Temp3
+	swap	A
+	anl	A, #0F0h
+	clr	C
+	subb	A, Temp2
+	jz	t1_int_xor_ok		; XOR check
+
+	mov	DPTR, #0		 	; Set pointer to start
+	setb	IE_EX0			; Enable int0 interrupts
+	setb	IE_EX1			; Enable int1 interrupts
+	ajmp int0_int_outside_range
+
+t1_int_xor_ok:
+	; Swap to be LSB aligned to 12 bits (and invert)
+	mov	A, Temp4
+	cpl	A
+	swap A
+	anl	A, #0F0h			; Low nibble of high byte
+	mov	Temp2, A
+	mov	A, Temp3
+	cpl	A
+	swap	A
+	anl	A, #0Eh			; High nibble of low byte (ignore lsb)
+	orl	A, Temp2
+	mov	Temp3, A
+	mov	A, Temp4			; High nibble of high byte
+	cpl	A
+	swap A
+	anl	A, #0Fh
+	mov	Temp4, A
+	; Subtract 96 (still 12 bits)
+	clr	C
+	mov	A, Temp3
+	subb	A, #96
+	mov	Temp3, A
+	mov	A, Temp4
+	subb	A, #0
+	mov	Temp4, A
+	jnc	($+8)
+
+	mov	Temp4, #0
+	mov	Temp3, #0
+	mov	Temp2, #0
+
+	; Check for bidirectional operation (0=stop, 96-2095->fwd, 2096-4095->rev)
+	jnb	Flags3.PGM_BIDIR, t1_int_not_bidir	; If not bidirectional operation - branch
+
+	; Subtract 2000 (still 12 bits)
+	clr	C
+	mov	A, Temp3
+	subb	A, #0D0h
+	mov	Temp1, A
+	mov	A, Temp4
+	subb	A, #07h
+	mov	Temp2, A
+	jc	t1_int_bidir_fwd				; If result is negative - branch
+
+	mov	A, Temp1
+	mov	Temp3, A
+	mov	A, Temp2
+	mov	Temp4, A
+	jb	Flags2.RCP_DIR_REV, t1_int_bidir_rev_chk	; If same direction - branch
+
+	setb	Flags2.RCP_DIR_REV
+	ajmp	t1_int_bidir_rev_chk
+
+t1_int_bidir_fwd:
+	jnb	Flags2.RCP_DIR_REV, t1_int_bidir_rev_chk	; If same direction - branch
+
+	clr	Flags2.RCP_DIR_REV
+
+t1_int_bidir_rev_chk:
+	jb	Flags3.PGM_BIDIR_REV, ($+5)
+
+	cpl	Flags2.RCP_DIR_REV
+
+	clr	C							; Multiply throttle value by 2
+	mov	A, Temp3
+	rlc	A
+	mov	Temp3, A
+	mov	A, Temp4
+	rlc	A
+	mov	Temp4, A
+t1_int_not_bidir:
+	; Generate 4/256
+	mov	A, Temp4
+	add	A, Temp4
+	addc	A, Temp4
+	addc	A, Temp4
+	mov	Temp2, A
+	; Align to 11 bits
+	clr	C
+	mov	A, Temp4
+	rrc	A
+	mov	Temp4, A
+	mov	A, Temp3
+	rrc	A
+	mov	Temp3, A
+	; Scale from 2000 to 2048
+	mov	A, Temp3
+	add	A, Temp2	; Holds 4/128
+	mov	Temp3, A
+	mov	A, Temp4
+	addc	A, #0
+	mov	Temp4, A
+	jnb	ACC.3, ($+7)
+
+	mov	Temp3, #0FFh
+	mov	Temp4, #0FFh
+
+	; Boost pwm during direct start
+	mov	A, Flags1
+	anl	A, #((1 SHL STARTUP_PHASE)+(1 SHL INITIAL_RUN_PHASE))
+	jz	t1_int_startup_boosted
+
+	jb	Flags1.MOTOR_STARTED, t1_int_startup_boosted	; Do not boost when changing direction in bidirectional mode
+
+	mov	A, Pwm_Limit_Beg				; Set 25% of max startup power as minimum power
+	rlc	A
+	mov	Temp2, A
+	mov	A, Temp4
+	jnz	t1_int_startup_boost_stall
+
+	clr	C
+	mov	A, Temp2
+	subb	A, Temp3
+	jc	t1_int_startup_boost_stall
+
+	mov	A, Temp2
+	mov	Temp3, A
+
+t1_int_startup_boost_stall:
+	mov	A, Stall_Cnt					; Add an extra power boost during start
+	swap	A
+	rlc	A
+	add	A, Temp3
+	mov	Temp3, A
+	mov	A, Temp4
+	addc	A, #0
+	mov	Temp4, A
+
+t1_int_startup_boosted:
+	; Set 8bit value
+	clr	C
+	mov	A, Temp3
+	rlc	A
+	swap	A
+	anl	A, #0Fh
+	mov	Temp1, A
+	mov	A, Temp4
+	rlc	A
+	swap	A
+	anl	A, #0F0h
+	orl	A, Temp1
+	mov	Temp1, A
+	jnz	t1_int_zero_rcp_checked	; New_Rcp (Temp1) is only zero if all 11 bits are zero
+
+	mov	A, Temp3
+	jz	t1_int_zero_rcp_checked
+
+	mov	Temp1, #1
+
+t1_int_zero_rcp_checked:
+	; Align to 10 bits for 24MHz MCU
+IF MCU_48MHZ == 0
+	clr	C
+	mov	A, Temp4
+	rrc	A
+	mov	Temp4, A
+	mov	A, Temp3
+	rrc	A
+	mov	Temp3, A
+ENDIF
+	mov	DPTR, #0		 			; Set pointer to start
+	setb	IE_EX0					; Enable int0 interrupts
+	setb	IE_EX1					; Enable int1 interrupts
+	; Decrement outside range counter
+	mov	A, Rcp_Outside_Range_Cnt
+	jz	($+4)
+
+	dec	Rcp_Outside_Range_Cnt
+
+	ajmp	int0_int_pulse_ready
+
+t1_int_frame_fail:
+	mov	DPTR, #0		 			; Set pointer to start
+	setb	IE_EX0					; Enable int0 interrupts
+	setb	IE_EX1					; Enable int1 interrupts
+	ajmp int0_int_outside_range
+
+
+;**** **** **** **** **** **** **** **** **** **** **** **** ****
+;
+; Timer 2 interrupt routine
 ;
 ; No assumptions
 ; Requirements: Temp variables can NOT be used since PSW.x is not set
@@ -522,7 +857,7 @@ t2_int_exit:
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;
-; Timer3 interrupt routine
+; Timer 3 interrupt routine
 ;
 ; No assumptions
 ; Requirements: Temp variables can NOT be used since PSW.x is not set
@@ -531,11 +866,11 @@ t2_int_exit:
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 t3_int:	; Used for commutation timing
 	clr 	IE_EA			; Disable all interrupts
-	anl	EIE1, #7Fh		; Disable timer3 interrupts
+	anl	EIE1, #7Fh		; Disable timer 3 interrupts
 	mov	TMR3RLL, #0FAh		; Set a short delay before next interrupt
 	mov	TMR3RLH, #0FFh
 	clr	Flags0.T3_PENDING 	; Flag that timer has wrapped
-	anl	TMR3CN0, #07Fh		; Timer3 interrupt flag cleared
+	anl	TMR3CN0, #07Fh		; Timer 3 interrupt flag cleared
 	setb	IE_EA			; Enable all interrupts
 	reti
 
@@ -548,6 +883,20 @@ t3_int:	; Used for commutation timing
 ;
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 int0_int:	; Used for RC pulse timing
+	push	ACC
+	mov	A, TL0			; Read pwm for DShot immediately
+	; Test for DShot
+	jnb	Flags2.RCP_DSHOT, int0_int_not_dshot
+
+	mov	TL1, DShot_Timer_Preset	; Reset sync timer
+	movx	@DPTR, A			; Store pwm
+	inc	DPTR
+	pop	ACC
+	reti
+
+	; Not DShot
+int0_int_not_dshot:
+	pop	ACC
 	clr	IE_EA
 	anl	EIE1, #0EFh		; Disable pca interrupts
 	push	PSW				; Preserve registers through interrupt
@@ -687,13 +1036,19 @@ ELSE
 ENDIF
 	jnc	int0_int_outside_range			; Yes - ignore pulse
 
-	; Check if below 745us (in order to ignore false pulses)
+	; Check if below 900us (in order to ignore false pulses)
 	clr	C
-	mov	A, Temp4						; Is pulse below 745us?
+	mov	A, Temp3
+IF MCU_48MHZ == 0
+	subb A, #9Ah
+ELSE
+	subb A, #34h
+ENDIF
+	mov	A, Temp4
 IF MCU_48MHZ == 0
 	subb A, #03h
 ELSE
-	subb A, #06h
+	subb A, #07h
 ENDIF
 	jnc	int0_int_check_full_range		; No - proceed
 
@@ -706,14 +1061,12 @@ int0_int_outside_range:
 
 	clr	C
 	mov	A, Rcp_Outside_Range_Cnt
-	subb	A, #10						; Allow a given number of outside pulses
+	subb	A, #50						; Allow a given number of outside pulses
 	jnc	($+4)
-	ajmp	int0_int_set_timeout			; If outside limits - ignore pulse
+	ajmp	int0_int_set_timeout			; If outside limits - ignore first pulses
 
 	mov	New_Rcp, #0					; Set pulse length to zero
-	mov	Temp3, #0
-	mov	Temp4, #0
-	ajmp	int0_int_set_pwm_registers
+	ajmp	int0_int_exit					; Exit without reseting timeout
 
 int0_int_check_full_range:
 	; Decrement outside range counter
@@ -756,7 +1109,6 @@ int0_int_calculate:
 
 	jnc	int0_int_bidir_fwd					; If result is positive - branch
 
-int0_int_bidir_rev:
 	jb	Flags2.RCP_DIR_REV, int0_int_bidir_rev_chk	; If same direction - branch
 
 	setb	Flags2.RCP_DIR_REV
@@ -1031,11 +1383,29 @@ ENDIF
 
 int0_int_set_timeout:
 	mov	Rcp_Timeout_Cntd, #10			; Set timeout count
+int0_int_exit:
 	pop	B							; Restore preserved registers
 	pop	ACC
 	pop	PSW
 	orl	EIE1, #10h					; Enable pca interrupts
 	reti
+
+
+;**** **** **** **** **** **** **** **** **** **** **** **** ****
+;
+; Int1 interrupt routine
+;
+; No assumptions
+;
+;**** **** **** **** **** **** **** **** **** **** **** **** ****
+int1_int:	; Used for RC pulse timing
+	clr	IE_EX1			; Disable int1 interrupts
+	setb	TCON_TR1			; Start timer 1
+	clr	TMR2CN0_TR2				; Timer 2 disabled
+	mov	DShot_Frame_Start_L, TMR2L	; Read timer value
+	mov	DShot_Frame_Start_H, TMR2H
+	setb	TMR2CN0_TR2				; Timer 2 enabled
+reti
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -1047,7 +1417,6 @@ int0_int_set_timeout:
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 pca_int:	; Used for setting pwm registers
 	clr	IE_EA
-	anl	IE, #0FEh			; Disable int0 interrupts
 	push	PSW				; Preserve registers through interrupt
 	push	ACC
 	setb	PSW.3			; Select register bank 1 for this interrupt
@@ -1095,6 +1464,11 @@ ELSE								; EN/PWM style drivers
 
 ENDIF
 
+	; Pwm updated, enable/disable interrupts
+	setb	IE_EX0					; Enable int0 interrupts
+	jnb	Flags2.RCP_DSHOT, ($+5)
+	setb	IE_EX1					; Enable int1 interrupts (DShot only)
+	anl	EIE1, #0EFh				; Disable pca interrupts
 	; Check RC pulse against stop value
 	clr	C
 	mov	A, New_Rcp				; Load new pulse value
@@ -1121,9 +1495,8 @@ IF FETON_DELAY == 0
 ENDIF
 	pop	ACC						; Restore preserved registers
 	pop	PSW
-	orl	IE, #01h					; Enable int0 interrupts
 	setb	IE_EA
-reti
+	reti
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -1165,83 +1538,6 @@ waitxms_m:	; Middle loop
 	djnz	Temp1, waitxms_m
 	djnz	Temp2, waitxms_o
 	ret
-
-
-;**** **** **** **** **** **** **** **** **** **** **** **** ****
-;
-; Beeper routines (4 different entry points) 
-;
-; No assumptions
-;
-;**** **** **** **** **** **** **** **** **** **** **** **** ****
-beep_f1:	; Entry point 1, load beeper frequency 1 settings
-	mov	Temp3, #20	; Off wait loop length
-	mov	Temp4, #120	; Number of beep pulses
-	jmp	beep
-
-beep_f2:	; Entry point 2, load beeper frequency 2 settings
-	mov	Temp3, #16
-	mov	Temp4, #140
-	jmp	beep
-
-beep_f3:	; Entry point 3, load beeper frequency 3 settings
-	mov	Temp3, #13
-	mov	Temp4, #180
-	jmp	beep
-
-beep_f4:	; Entry point 4, load beeper frequency 4 settings
-	mov	Temp3, #11
-	mov	Temp4, #200
-	jmp	beep
-
-beep:	; Beep loop start
-	mov	A, Beep_Strength
-	djnz	ACC, beep_start
-	ret
-
-beep_start:
-	mov	Temp2, #2
-beep_onoff:
-	clr	A
-	BcomFET_off		; BcomFET off
-	djnz	ACC, $		; Allow some time after comfet is turned off
-	BpwmFET_on		; BpwmFET on (in order to charge the driver of the BcomFET)
-	djnz	ACC, $		; Let the pwmfet be turned on a while
-	BpwmFET_off		; BpwmFET off again
-	djnz	ACC, $		; Allow some time after pwmfet is turned off
-	BcomFET_on		; BcomFET on
-	djnz	ACC, $		; Allow some time after comfet is turned on
-	; Turn on pwmfet
-	mov	A, Temp2
-	jb	ACC.0, beep_apwmfet_on
-	ApwmFET_on		; ApwmFET on
-beep_apwmfet_on:
-	jnb	ACC.0, beep_cpwmfet_on
-	CpwmFET_on		; CpwmFET on
-beep_cpwmfet_on:
-	mov	A, Beep_Strength
-	djnz	ACC, $		
-	; Turn off pwmfet
-	mov	A, Temp2
-	jb	ACC.0, beep_apwmfet_off
-	ApwmFET_off		; ApwmFET off
-beep_apwmfet_off:
-	jnb	ACC.0, beep_cpwmfet_off
-	CpwmFET_off		; CpwmFET off
-beep_cpwmfet_off:
-	mov	A, #150		; 25µs off
-	djnz	ACC, $		
-	djnz	Temp2, beep_onoff
-	; Copy variable
-	mov	A, Temp3
-	mov	Temp1, A	
-beep_off:		; Fets off loop
-	djnz	ACC, $
-	djnz	Temp1,	beep_off
-	djnz	Temp4,	beep
-	BcomFET_off		; BcomFET off
-	ret
-
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;
@@ -1502,13 +1798,13 @@ initialize_timing:
 calc_next_comm_timing:		; Entry point for run phase
 	; Read commutation time
 	clr	IE_EA
-	mov	TMR2CN0, #00h		; Timer2 disabled
+	clr	TMR2CN0_TR2		; Timer 2 disabled
 	mov	Temp1, TMR2L		; Load timer value
 	mov	Temp2, TMR2H	
 	mov	Temp3, Timer2_X
 	jnb	TMR2CN0_TF2H, ($+4)	; Check if interrupt is pending
 	inc	Temp3			; If it is pending, then timer has already wrapped
-	mov	TMR2CN0, #04h		; Timer2 enabled
+	setb	TMR2CN0_TR2		; Timer 2 enabled
 	setb	IE_EA
 IF MCU_48MHZ == 1
 	clr	C
@@ -1554,11 +1850,13 @@ IF MCU_48MHZ == 1
 	anl	A, #7Fh
 ENDIF
 	mov	Temp3, A
-	jz	($+6)
+	jz	calc_next_comm_startup_no_X
 
 	mov	Temp1, #0FFh
 	mov	Temp2, #0FFh
+	ajmp	calc_next_comm_startup_average
 
+calc_next_comm_startup_no_X:
 	mov	Temp7, Prev_Prev_Comm_L
 	mov	Temp8, Prev_Prev_Comm_H
 	mov	Prev_Prev_Comm_L, Temp4
@@ -1573,6 +1871,7 @@ ENDIF
 	subb	A, Temp8
 	mov	Temp2, A
 
+calc_next_comm_startup_average:
 	clr	C
 	mov	A, Comm_Period4x_H		; Average with previous and save
 	rrc	A
@@ -1744,7 +2043,7 @@ load_min_time:
 	mov	Temp4, A 
 
 calc_new_wait_times_exit:	
-	ajmp	wait_advance_timing
+	ljmp	wait_advance_timing
 
 
 ; Fast calculation (Comm_Period4x_H less than 2)
@@ -1787,7 +2086,7 @@ calc_next_comm_timing_fast:
 	jc	($+4)
 
 	clr	Flags1.HIGH_RPM 		; Clear high rpm bit
-	
+
 	; Set timing reduction
 	mov	Temp1, #2
 	mov	A, Temp4				; Divide by 2 4 times
@@ -1836,7 +2135,7 @@ wait_advance_timing:
 	mov	TMR3RLL, Wt_ZC_Tout_Start_L
 	mov	TMR3RLH, Wt_ZC_Tout_Start_H
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h	; Enable timer3 interrupts
+	orl	EIE1, #80h	; Enable timer 3 interrupts
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -1865,8 +2164,8 @@ IF MCU_48MHZ == 1
 	rlc	A
 	mov	Temp2, A
 ENDIF
-	jnb	Flags1.HIGH_RPM, ($+5)	; Branch if high rpm
-	ajmp	calc_new_wait_times_fast
+	jnb	Flags1.HIGH_RPM, ($+6)	; Branch if high rpm
+	ljmp	calc_new_wait_times_fast
 
 	mov	A, Temp1				; Copy values
 	mov	Temp3, A
@@ -1931,7 +2230,7 @@ store_times_increase:
 	mov	Wt_Adv_Start_H, Temp2
 	mov	Wt_Zc_Scan_Start_L, Temp5	; Use this value for zero cross scan delay (7.5deg)
 	mov	Wt_Zc_Scan_Start_H, Temp6
-	ajmp	wait_before_zc_scan
+	ljmp	wait_before_zc_scan
 
 store_times_decrease:
 	mov	Wt_Comm_Start_L, Temp1		; Now commutation time (~60deg) divided by 4 (~15deg nominal)
@@ -1950,7 +2249,7 @@ store_times_decrease:
 	mov	Wt_Zc_Tout_Start_H, #0FFh
 
 store_times_exit:
-	ajmp	wait_before_zc_scan
+	ljmp	wait_before_zc_scan
 
 
 calc_new_wait_times_fast:	
@@ -1993,7 +2292,7 @@ store_times_increase_fast:
 	mov	Wt_Comm_Start_L, Temp3		; Now commutation time (~60deg) divided by 4 (~15deg nominal)
 	mov	Wt_Adv_Start_L, Temp1		; New commutation advance time (~15deg nominal)
 	mov	Wt_Zc_Scan_Start_L, Temp5	; Use this value for zero cross scan delay (7.5deg)
-	ajmp	wait_before_zc_scan
+	ljmp	wait_before_zc_scan
 
 store_times_decrease_fast:
 	mov	Wt_Comm_Start_L, Temp1		; Now commutation time (~60deg) divided by 4 (~15deg nominal)
@@ -2018,7 +2317,7 @@ wait_before_zc_scan:
 	mov	Startup_Zc_Timeout_Cntd, #2
 setup_zc_scan_timeout:
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h			; Enable timer3 interrupts
+	orl	EIE1, #80h			; Enable timer 3 interrupts
 	mov	A, Flags1
 	anl	A, #((1 SHL STARTUP_PHASE)+(1 SHL INITIAL_RUN_PHASE))
 	jz	wait_before_zc_scan_exit		
@@ -2049,8 +2348,8 @@ ENDIF
 
 setup_zc_scan_timeout_startup_done:
 	clr	IE_EA
-	anl	EIE1, #7Fh			; Disable timer3 interrupts
-	mov	TMR3CN0, #00h			; Timer3 disabled and interrupt flag cleared
+	anl	EIE1, #7Fh			; Disable timer 3 interrupts
+	mov	TMR3CN0, #00h			; Timer 3 disabled and interrupt flag cleared
 	clr	C
 	clr	A
 	subb	A, Temp1				; Set timeout
@@ -2058,9 +2357,9 @@ setup_zc_scan_timeout_startup_done:
 	clr	A
 	subb	A, Temp2		
 	mov	TMR3H, A
-	mov	TMR3CN0, #04h			; Timer3 enabled and interrupt flag cleared
+	mov	TMR3CN0, #04h			; Timer 3 enabled and interrupt flag cleared
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h			; Enable timer3 interrupts
+	orl	EIE1, #80h			; Enable timer 3 interrupts
 	setb	IE_EA
 
 wait_before_zc_scan_exit:          
@@ -2083,7 +2382,7 @@ wait_for_comp_out_low:
 	mov	Bit_Access, #00h			; Desired comparator output
 	jnb	Flags1.DIR_CHANGE_BRAKE, ($+6)
 	mov	Bit_Access, #40h		
-	jmp	wait_for_comp_out_start
+	ajmp	wait_for_comp_out_start
 
 wait_for_comp_out_high:
 	setb	Flags0.DEMAG_DETECTED		; Set demag detected flag as default
@@ -2182,9 +2481,8 @@ comp_read_wrong_not_startup:
 
 comp_read_wrong_extend_timeout:
 	clr	Flags0.DEMAG_DETECTED		; Clear demag detected flag
-	clr	IE_EA
-	anl	EIE1, #7Fh				; Disable timer3 interrupts
-	mov	TMR3CN0, #00h				; Timer3 disabled and interrupt flag cleared
+	anl	EIE1, #7Fh				; Disable timer 3 interrupts
+	mov	TMR3CN0, #00h				; Timer 3 disabled and interrupt flag cleared
 	jnb	Flags1.HIGH_RPM, comp_read_wrong_low_rpm	; Branch if not high rpm
 
 	mov	TMR3L, #00h				; Set timeout to ~1ms
@@ -2194,11 +2492,10 @@ ELSE
 	mov	TMR3H, #0F8h
 ENDIF
 comp_read_wrong_timeout_set:
-	mov	TMR3CN0, #04h				; Timer3 enabled and interrupt flag cleared
+	mov	TMR3CN0, #04h				; Timer 3 enabled and interrupt flag cleared
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h				; Enable timer3 interrupts
-	setb	IE_EA
-	ajmp	wait_for_comp_out_start		; If comparator output is not correct - go back and restart
+	orl	EIE1, #80h				; Enable timer 3 interrupts
+	ljmp	wait_for_comp_out_start		; If comparator output is not correct - go back and restart
 
 comp_read_wrong_low_rpm:
 	mov	A, Comm_Period4x_H			; Set timeout to ~4x comm period 4x value
@@ -2234,7 +2531,7 @@ comp_read_ok:
 	jnc	($+4)
 	ajmp	wait_for_comp_out_start
 
-	jnb	Flags0.DEMAG_DETECTED, ($+5)	; Do not accept correct comparator output if it is demag	
+	jnb	Flags0.DEMAG_DETECTED, ($+5)	; Do not accept correct comparator output if it is demag
 	ajmp	wait_for_comp_out_start
 
 	djnz	Temp1, comp_read_ok_jmp		; Decrement readings counter - repeat comparator reading if not zero
@@ -2257,16 +2554,16 @@ comp_read_ok_jmp:
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 setup_comm_wait:
 	clr	IE_EA
-	anl	EIE1, #7Fh		; Disable timer3 interrupts
-	mov	TMR3CN0, #00h		; Timer3 disabled and interrupt flag cleared
+	anl	EIE1, #7Fh		; Disable timer 3 interrupts
+	mov	TMR3CN0, #00h		; Timer 3 disabled and interrupt flag cleared
 	mov	TMR3L, Wt_Comm_Start_L
 	mov	TMR3H, Wt_Comm_Start_H
-	mov	TMR3CN0, #04h		; Timer3 enabled and interrupt flag cleared
+	mov	TMR3CN0, #04h		; Timer 3 enabled and interrupt flag cleared
 	; Setup next wait time
 	mov	TMR3RLL, Wt_Adv_Start_L
 	mov	TMR3RLH, Wt_Adv_Start_H
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h		; Enable timer3 interrupts
+	orl	EIE1, #80h		; Enable timer 3 interrupts
 	setb	IE_EA			; Enable interrupts again
 
 
@@ -2354,7 +2651,7 @@ wait_for_comm_wait:
 	mov	TMR3RLL, Wt_Zc_Scan_Start_L
 	mov	TMR3RLH, Wt_Zc_Scan_Start_H
 	setb	Flags0.T3_PENDING
-	orl	EIE1, #80h			; Enable timer3 interrupts
+	orl	EIE1, #80h			; Enable timer 3 interrupts
 	ret
 
 
@@ -2401,7 +2698,7 @@ comm2comm3:
 	AcomFET_on				; To reapply power after a demag cut
 	setb	IE_EA
 	Set_Comp_Phase_C 			; Set comparator phase
-	ljmp	comm_exit
+	ajmp	comm_exit
 
 comm23_rev:
 	clr 	IE_EA				; Disable all interrupts
@@ -2410,7 +2707,7 @@ comm23_rev:
 	CcomFET_on				; To reapply power after a demag cut
 	setb	IE_EA
 	Set_Comp_Phase_A 			; Set comparator phase (reverse)
-	ljmp	comm_exit
+	ajmp	comm_exit
 
 
 ; Comm phase 3 to comm phase 4
@@ -2447,7 +2744,7 @@ comm4comm5:
 	CcomFET_on				; To reapply power after a demag cut
 	setb	IE_EA
 	Set_Comp_Phase_B 			; Set comparator phase
-	ljmp	comm_exit
+	jmp	comm_exit
 
 comm45_rev:
 	clr 	IE_EA				; Disable all interrupts
@@ -2456,7 +2753,7 @@ comm45_rev:
 	AcomFET_on				; To reapply power after a demag cut
 	setb	IE_EA
 	Set_Comp_Phase_B 			; Set comparator phase
-	ljmp	comm_exit
+	jmp	comm_exit
 
 
 ; Comm phase 5 to comm phase 6
@@ -2506,6 +2803,218 @@ comm61_rev:
 comm_exit:
 	clr	Flags0.DEMAG_CUT_POWER	; Clear demag power cut flag
 	ret
+
+;**** **** **** **** **** **** **** **** **** **** **** **** ****		
+;		
+; Beeper routines (4 different entry points) 		
+;		
+; No assumptions		
+;		
+;**** **** **** **** **** **** **** **** **** **** **** **** ****		
+beep_f1:	; Entry point 1, load beeper frequency 1 settings		
+	jb 	Flags3.CZ_TONES, beep_cz1		
+	mov	Temp3, #20	; Off wait loop length		
+	mov	Temp4, #200	; Number of beep pulses		
+	jmp	beep
+			
+beep_f2:	; Entry point 2, load beeper frequency 2 settings		
+	jb 	Flags3.CZ_TONES, beep_cz2		
+	mov	Temp3, #16		
+	mov	Temp4, #140		
+	jmp	beep	
+		
+beep_f3:	; Entry point 3, load beeper frequency 3 settings		
+	jb 	Flags3.CZ_TONES, beep_cz3		
+	mov	Temp3, #13		
+	mov	Temp4, #180		
+	jmp	beep
+			
+beep_f4:	; Entry point 4, load beeper frequency 4 settings		
+	jb 	Flags3.CZ_TONES, beep_cz4		
+	mov	Temp3, #11		
+	mov	Temp4, #200		
+			
+beep:		; Beep loop start		
+	jnb	Flags3.MUTE, beep_start
+	ret	
+beep_start:		
+	mov	Temp2, #2		
+beep_onoff:		
+	clr	A		
+	BcomFET_off		; BcomFET off		
+	djnz	ACC, $		; Allow some time after comfet is turned off		
+	BpwmFET_on		; BpwmFET on (in order to charge the driver of the BcomFET)		
+	djnz	ACC, $		; Let the pwmfet be turned on a while		
+	BpwmFET_off		; BpwmFET off again		
+	djnz	ACC, $		; Allow some time after pwmfet is turned off		
+	BcomFET_on		; BcomFET on		
+	djnz	ACC, $		; Allow some time after comfet is turned on		
+	; Turn on pwmfet		
+	mov	A, Temp2		
+	jb	ACC.0, beep_apwmfet_on		
+	ApwmFET_on		; ApwmFET on		
+beep_apwmfet_on:		
+	jnb	ACC.0, beep_cpwmfet_on		
+	CpwmFET_on		; CpwmFET on		
+beep_cpwmfet_on:		
+	mov	A, Beep_Strength		
+	djnz	ACC, $				
+	; Turn off pwmfet		
+	mov	A, Temp2		
+	jb	ACC.0, beep_apwmfet_off		
+	ApwmFET_off		; ApwmFET off		
+beep_apwmfet_off:		
+	jnb	ACC.0, beep_cpwmfet_off		
+	CpwmFET_off		; CpwmFET off		
+beep_cpwmfet_off:		
+	mov	A, #150		; 25Âµs off		
+	djnz	ACC, $				
+	djnz	Temp2, beep_onoff		
+	; Copy variable		
+	mov	A, Temp3		
+	mov	Temp1, A			
+beep_off:		; Fets off loop		
+	djnz	ACC, $		
+	djnz	Temp1,	beep_off		
+	djnz	Temp4,	beep_start		
+	BcomFET_off		; BcomFET off		
+	ret		
+;**** **** **** **** **** **** **** **** **** **** **** **** ****		
+;		
+; Tone Engine for Inc/Dec/Variable Tones		
+;		
+;**** **** **** **** **** **** **** **** **** **** **** **** ****		
+beep_cz1:				
+	mov	Temp3, #80   		; total tone play length				
+	mov	Temp5, #80   		; number of delay loops to set starting frequency, frequency will increase as count is decremented.				
+	mov Temp4, #5			; number of times to repeat tone at each fequency.				
+	mov Temp6, #20			; size of base delay (highest frequency tone ceiling)						
+	jmp mute_check		
+					
+beep_cz2:				
+	mov	Temp3, #50				
+	mov	Temp5, #40				
+	mov Temp4, #20				
+	mov Temp6, #40				
+	jmp mute_check		
+					
+beep_cz3:				
+	mov	Temp3, #60				
+	mov	Temp5, #180				
+	mov Temp4, #4				
+	mov Temp6, #10						
+	jmp mute_check		
+			
+beep_cz4:				
+	mov	Temp3, #150				
+	mov	Temp5, #50				
+	mov Temp4, #2				
+	mov Temp6, #30				
+	jmp mute_check
+			
+beep_beacon:		
+	mov Temp3, #100		; number of itterations of the tone loop to run.				
+	mov Temp5, #40		; starting tone (in number of delay cycles) for decrementing delay (increasing frequency)		
+	mov Temp4, #5		; number of times to repeat inner loop at each fequency before.				
+	mov Temp6, #15		; base delay		
+	jmp mute_check		
+			
+startup_wave1:				
+	mov	Temp1, #Pgm_Direction					
+	mov	A, @Temp1				
+	dec A				
+;	jnz startup_wave2				
+	setb Flags3.TONE_WAVE				
+	mov	Temp3, #200		; number of itterations of the tone loop to run.		
+	mov	Temp5, #50		; starting tone (in number of delay cycles) for decrementing delay (increasing frequency)				
+	mov Temp4, #3		; number of times to repeat inner loop at each fequency before.				
+	mov Temp6, #60		; base delay				
+	jmp mute_check		
+					
+startup_wave2:				
+	mov	Temp3, #200		; number of itterations of the tone loop to run.				
+	mov	Temp5, #80		; starting tone (in number of delay cycles) for decrementing delay (increasing frequency)				
+	mov Temp4, #5		; number of times to repeat inner loop at each fequency before.				
+	mov Temp6, #70		; base delay		
+			
+mute_check:		
+	jnb Flags3.MUTE, music_outer_loop		
+	ret			
+			
+music_outer_loop:				
+	mov A, Temp4				
+	mov Temp1, A			; load temp1 with temp4 value, work with temp1 preserve temp4.				
+	jnb Flags3.TONE_WAVE, no_wave				
+	jb Flags3.TONE_DIR, inc_tone				
+	dec Temp5				
+	mov A, Temp5				
+	cjne A, #1, music_inner_loop				
+	cpl Flags3.TONE_DIR				
+	jmp music_inner_loop				
+					
+inc_tone:				
+	inc Temp5				
+	mov A, Temp5				
+	cjne A, #50, music_inner_loop				
+	cpl Flags3.TONE_DIR				
+	jmp music_inner_loop				
+					
+no_wave:					
+	dec Temp5				; decrement frequency delay loop count					
+	mov A, Temp5 				
+	jnz music_inner_loop				
+	inc Temp5				
+					
+music_inner_loop:				
+	Mov A, Temp5 		; push variables onto the stack to preserve them during fet on/off macro				
+	Push ACC				
+	Mov A, Temp1				
+	Push ACC				
+	Mov A, Temp6				
+	Push ACC				
+			
+	jnb Flags3.FET_SWAP, tone_BC				
+	BcomFET_on		; BcomFET on				
+	ApwmFET_on		; ApwmFET on				
+	mov	A, Beep_Strength				
+	djnz	ACC, $						
+	ApwmFET_off		; ApwmFET off				
+	BcomFET_off		; BcomFET off				
+	jmp tone_AB					
+tone_BC:					
+	BcomFET_on		; BcomFET on				
+	CpwmFET_on		; CpwmFET on				
+	mov	A, Beep_Strength				
+	djnz	ACC, $						
+	CpwmFET_off		; CpwmFET off				
+	BcomFET_off		; BcomFET off				
+tone_AB:				
+	cpl Flags3.FET_SWAP					
+	Pop ACC				
+	mov Temp6, A				
+	mov Temp7, A				
+	Pop ACC				; pop variables off the stack, and restore them.				
+	Mov Temp1, A  				
+	Pop ACC				  				
+	Mov Temp5, A  				
+	Mov Temp2, A  		; make copy of temp5 to work with.				
+						; run minimum delay loop to keep our tone within the frquency range we're after (~3khz-800hz ideally)				
+music_base_delay:				
+	mov	A, #100									;30us wait				
+	djnz	ACC, $									; timing delay				
+	djnz	Temp7, music_base_delay        			; base delay loop run count 				
+music_variable_delay:							 	; changing delay (adjust tone frequency)				
+	mov	A, #75										; 17us wait				
+	djnz	ACC, $                        			; timing delay				
+	djnz	Temp2, music_variable_delay  			; run this loop #Temp5 times				
+	jb		Flags3.FET_SWAP, music_inner_loop		
+	djnz	Temp1, music_inner_loop					; 		
+	djnz	Temp3, dec_again		
+	ret		
+dec_again:			
+	djnz	Temp3, music_outer_loop				    ; total length of tone				
+	ret					
+			
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -2742,7 +3251,7 @@ decode_temp_done:
 	call	scale_throttle_cal
 	mov	Max_Throttle_L, Temp1
 	mov	Max_Throttle_H, Temp2
-	call	switch_power_off			; Reset DPTR
+	call	switch_power_off
 	ret
 
 
@@ -2837,8 +3346,6 @@ find_throttle_gain_fwd:
 	mov	Throttle_Gain_M, Temp4
 	mov	Throttle_Gain, Temp3
 	ret
-
-ret
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -3015,7 +3522,166 @@ led_2_done:
 led_3_done:
 	ret
 
+;**** **** **** **** **** **** **** **** **** **** **** **** ****
+;		
+;		Music Routines		
+;		
+;**** **** **** **** **** **** **** **** **** **** **** **** ****		
+music_a4:		
+	mov	Temp3, #220 ;55 	;length of tone		
+	mov Temp4, #54			;number of delay loop1 cycles (tone frequency)		
+	mov Temp5, #2			;number of delay loop2 cycles (octave range?/large step?)		
+	jmp music
+			
+music_as4:		
+	mov	Temp3, #58 				
+	mov Temp4, #29		
+	mov Temp5, #2		
+	jmp music		
+			
+music_b4:		
+	mov	Temp3, #62 				
+	mov Temp4, #4		
+	mov Temp5, #2		
+	jmp music		
+			
+music_e4:		
+	mov	Temp3, #164 ;41 				
+	mov Temp4, #6		
+	mov Temp5, #3		
+	jmp music		
+			
+music_f1:		
+	mov	Temp3, #222 								;length of tone		
+	mov Temp4, #110		
+	mov Temp5, #2									;one ms ;frequency of tone 1=500, 2=1000, 3=1500		
+	jmp music		
+			
+music_f2:		
+	mov	Temp3, #132 								;length of tone		
+	mov Temp4, #43		
+	mov Temp5, #3									;one ms ;frequency of tone 1=500, 2=1000, 3=1500		
+	jmp music		
+			
+music_f3:		
+	mov	Temp3, #132 								;length of tone		
+	mov Temp4, #29		
+	mov Temp5, #2									;one ms ;frequency of tone 1=500, 2=1000, 3=1500		
+	jmp music		
+			
+music_f4:		
+	mov	Temp3, #88 ;44 				
+	mov Temp4, #172		
+	mov Temp5, #2		
+	jmp music		
+			
+music_g4:		
+	mov	Temp3, #98 ;49 				
+	mov Temp4, #110		
+	mov Temp5, #2		
+	jmp music		
+			
+music_c:		
+	mov	Temp3, #65 				
+	mov Temp4, #182		
+	mov Temp5, #1		
+	jmp music		
+			
+music_d:		
+	mov	Temp3, #73 				
+	mov Temp4, #140		
+	mov Temp5, #1		
+	jmp music		
+music_d2:		
+	mov	Temp3, #146 ;73 				
+	mov Temp4, #140		
+	mov Temp5, #1		
+	jmp music			
+			
+music_ds:		
+	mov	Temp3, #78 				
+	mov Temp4, #121		
+	mov Temp5, #1		
+	jmp music		
 
+music_e:		
+	mov	Temp3, #82 				
+	mov Temp4, #103		
+	mov Temp5, #1		
+	jmp music		
+
+music_e2:		
+	mov	Temp3, #164 				
+	mov Temp4, #103		
+	mov Temp5, #1		
+	jmp music		
+			
+music_f:		
+	mov	Temp3, #87 				
+	mov Temp4, #86		
+	mov Temp5, #1		
+	jmp music		
+			
+music_g:		
+	mov	Temp3, #196 ;98 				
+	mov Temp4, #55		
+	mov Temp5, #1
+			
+music:		
+	mov A, Temp5		
+	push ACC		
+			
+	BcomFET_on										; BcomFET on				
+	ApwmFET_on										; ApwmFET on				
+	mov	A, Beep_Strength				
+	djnz	ACC, $						
+	ApwmFET_off										; ApwmFET off				
+	BcomFET_off										; BcomFET off				
+	pop ACC		
+	mov Temp5, A		
+	mov Temp2, A									; Make copy of Temp5 to work with (Temp2)		
+	mov A, Temp4		
+	mov Temp6, A		
+music_O_loop:										; Outer loop		
+	mov	Temp1, #23					  				; Number of times to repeat inner delay loop		
+music_M_loop:										; Middle loop		
+	clr	A		
+ 	djnz	ACC, $									; Inner loop (42.7us - 1024 cycles)		
+	djnz	Temp1, music_M_loop		
+	djnz	Temp2, music_O_loop		
+			
+wait_150us:		
+	mov		A, #30									;5us wait		
+	djnz	ACC, $		
+	djnz	Temp6, wait_150us			
+	djnz	Temp3, music 							; length of tone		
+	
+ret
+
+Protocol_ID:
+	Clear_LED_0
+	call wait30ms
+	Set_LED_1
+	mov A, #02
+	jb	Flags2.RCP_ONESHOT125, IDbeep_loop
+	inc A
+	jb	Flags2.RCP_ONESHOT42, IDbeep_loop
+	inc A
+	jb	Flags2.RCP_MULTISHOT, IDbeep_loop
+	inc A
+	jb	Flags2.RCP_DSHOT, IDbeep_loop
+	mov A, #01
+	
+IDbeep_loop:
+	push ACC
+	call beep_f1
+	call wait100ms
+	pop ACC
+	djnz	ACC, IDbeep_loop
+
+ret
+	
+	
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -3081,13 +3747,236 @@ ENDIF
 	; Initializing beep
 	clr	IE_EA			; Disable interrupts explicitly
 	call wait200ms	
+	call led_control
+	call wait200ms
+	call wait200ms
+	
+; ESC startup tone		
+;-------------------------------------------------------		
+;			Tone Decision Logic		
+;		
+; Choose Music Routine based on Beacon Delay Setting		
+; --------------------		
+; 1) OEM Tones		
+; 2) CZ Tones		
+; 3) Game of Thrones Startup Tone		
+; 4) Imperial March Startup Tone		
+; 5) Harrison Gale 		
+	
+	mov	A, Beep_Strength						
+	dec A		
+	jnz	Tone_Selection
+	setb Flags3.MUTE		
+	ljmp startup_end		
+			
+Tone_Selection:
+	Set_LED_0
+	clr Flags3.MUTE
+	subb A, #89
+	dec A		
+	jz Startup_IM		
+	dec A		
+	jz Startup_CZ 								
+	dec A		
+	jz Startup_GoT										
+	dec A		
+	jz HG_Bounce		
+	ljmp OEM_Tones
+
+HG_Bounce:
+	ljmp Startup_HG	
+										 		
+Startup_CZ:		
+	setb Flags3.CZ_TONES		
+	call startup_wave1		
+	call startup_wave1		
+	call startup_wave1		
+	jmp startup_end				
+			
+Startup_IM:		
+	call wait200ms		
+	call music_f1		
+	call wait100ms		
+	call music_f1		
+	call wait100ms		
+	call music_f1		
+	call wait100ms		
+	call music_f2		
+	call music_f3		
+	call music_f1		
+	call wait100ms		
+	call music_f2		
+	call music_f3		
+	call music_f1		
+	call music_f1		
+	jmp startup_end
+			
+Startup_GoT:		
+	call wait200ms			
+	call music_g		
+	call wait10ms		
+	call music_c		
+	call music_c		
+	call wait10ms		
+	call music_ds		
+	call wait10ms		
+	call music_f		
+	call wait10ms		
+	call music_g		
+	call wait10ms		
+	call music_c		
+	call music_c		
+	call wait10ms		
+	call music_ds		
+	call wait10ms		
+	call music_f		
+	call wait10ms		
+	call music_g		
+	call wait10ms		
+	call music_c		
+	call music_c		
+	call wait10ms		
+	call music_ds		
+	call wait10ms		
+	call music_f		
+	call wait10ms		
+	call music_g		
+	call wait10ms		
+	call music_c		
+	call music_c		
+	call wait10ms		
+	call music_ds		
+	call wait10ms		
+	call music_f		
+	call wait10ms		
+	call music_d2		
+	call wait10ms		
+	call music_g4		
+	call wait10ms		
+	call music_as4		
+	call wait10ms		
+	call music_c		
+	call wait10ms		
+	call music_d2		
+	call wait10ms		
+	call music_g4		
+	call wait10ms		
+	call music_as4		
+	call wait10ms		
+	call music_c		
+	call wait10ms		
+	call music_d2		
+	call wait10ms		
+	call music_g4		
+	call wait10ms		
+	call music_as4		
+	call wait10ms		
+	call music_c		
+	call wait10ms		
+	call music_d2		
+	call wait10ms		
+	call music_g4		
+	call wait10ms		
+	call music_as4		
+	call wait10ms		
+	call music_c		
+	call wait10ms		
+	call music_f		
+	call music_f		
+	call wait10ms		
+	call music_f4			
+	jmp startup_end
+			
+Startup_HG:			
+	call music_a4		
+	call wait10ms		
+	call music_a4		
+	call wait10ms		
+	call wait10ms		
+	call music_e		
+	call wait3ms		
+	call music_e		
+	call wait3ms		
+	call music_e		
+	call wait3ms		
+	call music_e		
+	call wait10ms		
+	call wait10ms		
+	call music_g4		
+	call music_g4		
+	call wait10ms		
+	call music_g4		
+	call music_g4		
+	call wait10ms		
+	call wait10ms		
+	call music_d		
+	call wait3ms		
+	call music_d		
+	call wait3ms		
+	call music_d		
+	call wait3ms		
+	call music_d		
+	call wait10ms		
+	call wait10ms		
+	call music_f4		
+	call music_f4		
+	call wait10ms		
+	call music_f4		
+	call music_f4		
+	call wait10ms		
+	call wait10ms		
+	call music_c		
+	call wait3ms		
+	call music_c		
+	call wait3ms		
+	call music_c		
+	call wait3ms		
+	call music_c		
+	call wait10ms		
+	call wait10ms		
+	call music_e4		
+	call wait10ms		
+	call music_e4		
+	call wait10ms		
+	call wait10ms		
+	call music_b4		
+	call wait3ms		
+	call music_b4		
+	call wait3ms		
+	call music_b4		
+	call wait3ms		
+	call music_b4		
+	call wait10ms		
+	call wait10ms		
+	call music_a4		
+	call music_a4		
+	call wait10ms		
+	call wait10ms		
+	call music_g4		
+	call music_g4		
+	call music_g4		
+	call music_g4		
+	call wait10ms		
+	call wait10ms		
+	call music_f4		
+	call music_f4		
+	call music_f4		
+	call music_f4		
+	call wait10ms		
+	call wait10ms		
+	call music_e4		
+	call music_e4
+	jmp startup_end			
+
+OEM_Tones:		
 	call beep_f1
+	call wait30ms		
+	call beep_f2				
 	call wait30ms
-	call beep_f2
-	call wait30ms
-	call beep_f3
-	call wait30ms
-	call	led_control
+	call beep_f3		
+
+startup_end:			; end esc startup tone		
+	call wait30ms				
 
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -3126,27 +4015,27 @@ bootloader_done:
 IF MCU_48MHZ == 1
 	Set_MCU_Clk_24MHz
 ENDIF
+	; Setup timers for pwm input
 	mov	IT01CF, #RTX_PIN	; Route RCP input to INT0
-	mov	TCON, #11h		; Timer0 run and INT0 edge triggered
-	mov	CKCON0, #04h		; Timer0 clock is system clock
-	mov	TMOD, #09h		; Timer0 set to 16bits and gated by INT0
-	mov	TMR2CN0, #04h		; Timer2 enabled
-	mov	TMR3CN0, #04h		; Timer3 enabled
+	mov	TCON, #11h		; Timer 0 run and INT0 edge triggered
+	mov	CKCON0, #04h		; Timer 0 clock is system clock
+	mov	TMOD, #09h		; Timer 0 set to 16bits and gated by INT0
+	mov	TMR2CN0, #04h		; Timer 2 enabled
+	mov	TMR3CN0, #04h		; Timer 3 enabled
 	Initialize_PCA			; Initialize PCA
 	Set_Pwm_Polarity		; Set pwm polarity
 	Enable_Power_Pwm_Module	; Enable power pwm module
 	Enable_Damp_Pwm_Module	; Enable damping pwm module
 	; Enable interrupts
 IF MCU_48MHZ == 0
-	mov	IE, #21h			; Enable timer2 interrupts and INT0 interrupts
+	mov	IE, #21h			; Enable timer 2 interrupts and INT0 interrupts
 ELSE
-	mov	IE, #23h			; Enable timer0, timer2 interrupts and INT0 interrupts
+	mov	IE, #23h			; Enable timer 0, timer 2 interrupts and INT0 interrupts
 ENDIF
-	mov	EIE1, #90h		; Enable timer3 and PCA0 interrupts
-	mov	EIP1, #10h		; High priority to PCA0 interrupts
+	mov	EIE1, #90h		; Enable timer 3 and PCA0 interrupts
+	mov	IP, #01h			; High priority to INT0 interrupts
 	; Initialize comparator
-	mov	CMP0CN0, #80h		; Comparator enabled, no hysteresis
-	mov	CMP0MD, #00h		; Comparator response time 100ns
+	Initialize_Comparator	; Initialize comparator
 	; Initialize ADC
 	Initialize_Adc			; Initialize ADC operation
 	call	wait1ms
@@ -3156,58 +4045,149 @@ ENDIF
 	; Initialize RC pulse
 	clr	Flags2.RCP_UPDATED		 	; Clear updated flag
 	call wait200ms
-	; Test whether signal is OneShot125
+	; Clear all shot flags
 	clr	Flags2.RCP_ONESHOT125			; Clear OneShot125 flag
+	clr	Flags2.RCP_ONESHOT42			; Clear OneShot42 flag
+	clr	Flags2.RCP_MULTISHOT			; Clear Multishot flag
+	clr	Flags2.RCP_DSHOT				; Clear DShot flag
+	; Test whether signal is regular pwm
 	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
 	call wait100ms						; Wait for new RC pulse
 	clr	C
-	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("745-2235us")
+	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
 	subb	A, #10						
-	jc	validate_rcp_start
+	jnc	($+4)
+	ajmp	validate_rcp_start
 
+	; Test whether signal is OneShot125
 	setb	Flags2.RCP_ONESHOT125			; Set OneShot125 flag
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
+	subb	A, #10
+	jnc	($+4)
+	ajmp	validate_rcp_start
 
 	; Test whether signal is OneShot42
-	clr	Flags2.RCP_ONESHOT42			; Clear OneShot42 flag
-	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
-	call wait100ms						; Wait for new RC pulse
-	clr	C
-	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("745-2235us")
-	subb	A, #10
-	jc	validate_rcp_start
-
+	clr	Flags2.RCP_ONESHOT125
 	setb	Flags2.RCP_ONESHOT42			; Set OneShot42 flag
-
-	; Test whether signal is Multishot
-	clr	Flags2.RCP_MULTISHOT			; Clear Multishot flag
 	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
 	call wait100ms						; Wait for new RC pulse
 	clr	C
-	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("745-2235us")
+	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
+	subb	A, #10
+	jnc	($+4)
+	ajmp	validate_rcp_start
+
+	; Setup timers for Multishot
+	mov	IT01CF, #RTX_PIN	; Route RCP input to INT0
+	mov	TCON, #11h		; Timer 0 run and INT0 edge triggered
+	mov	CKCON0, #04h		; Timer 0 clock is system clock
+	mov	TMOD, #09h		; Timer 0 set to 16bits and gated by INT0
+	; Setup interrupts for Multishot
+	setb	IE_ET0			; Enable timer 0 interrupts
+	clr	IE_ET1			; Disable timer 1 interrupts
+	clr	IE_EX1			; Disable int1 interrupts
+	; Test whether signal is Multishot
+	clr	Flags2.RCP_ONESHOT42
+	setb	Flags2.RCP_MULTISHOT			; Set Multishot flag
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
 	subb	A, #10
 	jc	validate_rcp_start
 
-	setb	Flags2.RCP_MULTISHOT			; Set OneShot42 flag
+	; Setup timers for DShot
+	mov	IT01CF, #(80h+(RTX_PIN SHL 4)+(RTX_PIN))	; Route RCP input to INT0/1, with INT1 inverted
+	mov	TCON, #51h		; Timer 0/1 run and INT0 edge triggered
+	mov	CKCON0, #01h		; Timer 0/1 clock is system clock divided by 4 (for DShot150)
+	mov	TMOD, #0AAh		; Timer 0/1 set to 8bits auto reload and gated by INT0
+	mov	TH0, #0			; Auto reload value zero
+	mov	TH1, #0
+	; Setup interrupts for DShot
+	clr	IE_ET0			; Disable timer 0 interrupts
+	setb	IE_ET1			; Enable timer 1 interrupts
+	setb	IE_EX1			; Enable int1 interrupts
+	; Setup variables for DSshot150
+IF MCU_48MHZ == 1
+	mov	DShot_Timer_Preset, #128			; Load DShot sync timer preset (for DShot150)
+ELSE
+	mov	DShot_Timer_Preset, #192
+ENDIF
+	mov	DShot_Pwm_Thr, #20				; Load DShot qualification pwm threshold (for DShot150)
+	mov	DShot_Frame_Length_Thr, #80		; Load DShot frame length criteria
+	; Test whether signal is DShot150
+	clr	Flags2.RCP_MULTISHOT
+	setb	Flags2.RCP_DSHOT
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	mov	DShot_Pwm_Thr, #16				; Load DShot regular pwm threshold
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check if pulses were accepted
+	subb	A, #10
+	jc	validate_rcp_start
 
+	; Setup variables for DShot300
+	mov	CKCON0, #0Ch					; Timer 0/1 clock is system clock (for DShot300)
+IF MCU_48MHZ == 1
+	mov	DShot_Timer_Preset, #0			; Load DShot sync timer preset (for DShot300)
+ELSE
+	mov	DShot_Timer_Preset, #128
+ENDIF
+	mov	DShot_Pwm_Thr, #40				; Load DShot qualification pwm threshold (for DShot300)
+	mov	DShot_Frame_Length_Thr, #40		; Load DShot frame length criteria
+	; Test whether signal is DShot300
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	mov	DShot_Pwm_Thr, #32				; Load DShot regular pwm threshold
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check if pulses were accepted
+	subb	A, #10
+	jc	validate_rcp_start
+
+	; Setup variables for DShot600
+	mov	CKCON0, #0Ch					; Timer 0/1 clock is system clock (for DShot600)
+IF MCU_48MHZ == 1
+	mov	DShot_Timer_Preset, #128			; Load DShot sync timer preset (for DShot600)
+ELSE
+	mov	DShot_Timer_Preset, #192
+ENDIF
+	mov	DShot_Pwm_Thr, #20				; Load DShot qualification pwm threshold (for DShot600)
+	mov	DShot_Frame_Length_Thr, #20		; Load DShot frame length criteria
+	; Test whether signal is DShot600
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	mov	DShot_Pwm_Thr, #16				; Load DShot regular pwm threshold
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check if pulses were accepted
+	subb	A, #10
+	jc	validate_rcp_start
+
+	ajmp	init_no_signal
+
+validate_rcp_start:
 	; Validate RC pulse
-validate_rcp_start:	
 	call wait3ms						; Wait for new RC pulse
 	jb	Flags2.RCP_UPDATED, ($+6)		; Is there an updated RC pulse available - proceed
 	ljmp	init_no_signal					; Go back to detect input signal
 
 	; Beep arm sequence start signal
 	clr 	IE_EA						; Disable all interrupts
-	call beep_f1						; Signal that RC pulse is ready
-	call beep_f1
-	call beep_f1
+	call Protocol_ID
+;	call beep_f1						; Signal that RC pulse is ready
+;	call beep_f1
+;	call beep_f1
 	setb	IE_EA						; Enable all interrupts
 	call wait200ms	
 
 	; Arming sequence start
 arming_start:
-	jnb	Flags3.PGM_BIDIR, ($+5)
+	jb	Flags2.RCP_DSHOT, ($+6)	; Disable tx programming for DShot
+	jnb	Flags3.PGM_BIDIR, ($+6)
 
-	ajmp	program_by_tx_checked	; Disable tx programming if bidirectional operation
+	ljmp	program_by_tx_checked	; Disable tx programming if bidirectional operation
 
 	call wait3ms
 	mov	Temp1, #Pgm_Enable_TX_Program; Start programming mode entry if enabled
@@ -3310,21 +4290,16 @@ program_by_tx_entry_store:
 program_by_tx_entry_wait:
 	call wait100ms
 	call	find_throttle_gains		; Set throttle gains
-	ajmp	init_no_signal			; Go back
+	ljmp	init_no_signal			; Go back
 
 program_by_tx_checked:
 	; Initialize flash keys to invalid values
 	mov	Flash_Key_1, #0
 	mov	Flash_Key_2, #0
 	call wait100ms				; Wait for new throttle value
-	mov	Temp1, #1				; Default stop value
-	jnb	Flags3.PGM_BIDIR, ($+5)	; No - branch
-
-	mov	Temp1, #5				; Higher stop value for bidirectional
-
 	clr	C
 	mov	A, New_Rcp			; Load new RC pulse value
-	subb	A, Temp1				; Below stop?
+	subb	A, #1				; Below stop?
 	jc	arm_end_beep			; Yes - proceed
 
 	jmp	arming_start			; No - start over
@@ -3332,8 +4307,10 @@ program_by_tx_checked:
 arm_end_beep:
 	; Beep arm sequence end signal
 	clr 	IE_EA				; Disable all interrupts
+	Clear_LED_1
+	call wait30ms	
+	Set_LED_2
 	call beep_f4				; Signal that rcpulse is ready
-	call beep_f4
 	call beep_f4
 	setb	IE_EA				; Enable all interrupts
 	call wait200ms
@@ -3386,7 +4363,7 @@ beep_delay_set:
 	mov	Temp1, #Pgm_Beacon_Strength
 	mov	Beep_Strength, @Temp1
 	clr 	IE_EA				; Disable all interrupts
-	call beep_f4				; Signal that there is no signal
+	call beep_beacon	; Signal that there is no signal
 	setb	IE_EA				; Enable all interrupts
 	mov	Temp1, #Pgm_Beep_Strength
 	mov	Beep_Strength, @Temp1
@@ -3400,10 +4377,9 @@ wait_for_power_on_no_beep:
 	jmp	init_no_signal				; If pulses missing - go back to detect input signal
 
 wait_for_power_on_not_missing:
-	mov	Temp1, #1
 	clr	C
 	mov	A, New_Rcp			; Load new RC pulse value
-	subb	A, Temp1		 		; Higher than stop (plus some hysteresis)?
+	subb	A, #1		 		; Higher than stop
 	jc	wait_for_power_on_loop	; No - start over
 
 	lcall wait100ms			; Wait to see if start pulse was only a glitch

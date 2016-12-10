@@ -13,8 +13,7 @@ DEL Output\*.* /Q
 RMDIR Output
 MKDIR Output
 MKDIR Output\Hex
-SET Revision=REV16_45
-rem SET KeilPath=C:\Dev\SiliconLabs\SimplicityStudio\v3\developer\toolchains\keil_8051\9.53\BIN
+SET Revision=REV16_51
 SET KeilPath=C:\SiliconLabs\SimplicityStudio\v3\developer\toolchains\keil_8051\9.53\BIN
 
 @ECHO Revision: %Revision% >> MakeHex_Result.txt
@@ -123,6 +122,30 @@ SET ESC=M_L_
 SET MCU_48MHZ=0
 call:compile
 SET ESC=M_H_
+SET MCU_48MHZ=1
+call:compile
+SET /A ESCNO+=1
+
+SET ESC=N_L_
+SET MCU_48MHZ=0
+call:compile
+SET ESC=N_H_
+SET MCU_48MHZ=1
+call:compile
+SET /A ESCNO+=1
+
+SET ESC=O_L_
+SET MCU_48MHZ=0
+call:compile
+SET ESC=O_H_
+SET MCU_48MHZ=1
+call:compile
+SET /A ESCNO+=1
+
+SET ESC=P_L_
+SET MCU_48MHZ=0
+call:compile
+SET ESC=P_H_
 SET MCU_48MHZ=1
 call:compile
 SET /A ESCNO+=1

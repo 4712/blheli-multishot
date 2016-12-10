@@ -45,7 +45,7 @@ Eep_ESC_Layout:		DB	"#EMAX_Ltng_20A# "	; ESC layout tag
 CSEG AT 1A50h
 Eep_ESC_MCU:			DB	"#BLHELI#F390#   "	; Project and MCU tag (16 Bytes)
 
-MCU_48MHZ				EQU	0	; Set to 1 if MCU can run at 48MHz
+MCU_48MHZ			EQU	1	; Set to 1 if MCU can run at 48MHz
 ONE_S_CAPABLE			EQU	0	; Set to 1 if ESC can operate at 1S
 PORT3_EXIST			EQU	0	; Set to 1 if MCU has port3
 COMP1_USED			EQU	0	; Set to 1 if MCU has comparator 1 and it is being used
