@@ -59,9 +59,13 @@ $NOMOD51
 ; - Rev16.4 Fixed bug where bootloader operation could be blocked by a defective "eeprom" signature
 ; - Rev16.5 Added support for DShot150, DShot300 and DShot600
 ; -Rev16.51 (cturn) Customized Default Values
-;	    Added selectedable startup tones, via the Beacon Delay config option
-;	    Added custom beacon tone, should be easier to hear & not heat up motors.
-; -Rev16.52 Fix for 32khz pwm rate Multishot Throttle Calibration bug.
+;	     			selectedable startup tones, via the 'Beeper Volume' setting
+;	    			custom beacon tone, should be easier to hear & not heat up motors.
+; -Rev16.52 Fix for 32khz Multishot Calibration bug (redacted) 
+; -Rev16.53 Added signal type identification via signal and arming tones.
+; - Rev16.6 Fixed signal detection issue of multishot at 32kHz
+;           Improved bidirectional mode for high input signal rates
+;
 ;
 ;**** **** **** **** ****
 ; Minimum 8K Bytes of In-System Self-Programmable Flash
@@ -118,10 +122,11 @@ J_			EQU 10	; L2 L1 L0 RC CC MB MC MA    X  X  Cc Bc Ac Cp Bp Ap	LEDs
 K_			EQU 11	; X  X  MC X  MB CC MA RC    X  X  Ap Bp Cp Cc Bc Ac	Com fets inverted
 L_			EQU 12	; X  X  RC X  CC MA MB MC    X  X  Ac Bc Cc Ap Bp Cp
 M_			EQU 13	; MA MC CC MB RC L0 X  X     X  Cc Bc Ac Cp Bp Ap X	Inverted LED
-N_			EQU 14	; X  X  RC X  MC MB MA CC    X  X  Cc Cp Bc Bp Ac Ap
-O_			EQU 15	; X  X  RC X  CC MA MC MB    X  X  Cc Cp Bc Bp Ac Ap	Like D, but low side pwm and 1S flag set
-P_			EQU 16	; X  X  RC MA CC MB MC X     X  Cc Bc Ac Cp Bp Ap X
-
+N_			EQU 14	; X  X  RC X  MC MB MA CC    X  X  Cp Cc Bp Bc Ap Ac
+O_			EQU 15	; X  X  RC X  CC MA MC MB    X  X  Cc Cp Bc Bp Ac Ap	Like D, but low side pwm and 1S flag set.
+P_			EQU 16	; X  X  RC MA CC MB MC X     X  Cc Bc Ac Cp Bp Ap X		
+Q_			EQU 17	; Cp Bp Ap L1 L0 X  RC X     X  MA MB MC CC Cc Bc Ac
+R_			EQU 18	; X  X  RC X  MC MB MA CC    X  X  Ac Bc Cc Ap Bp Cp
 
 ;**** **** **** **** ****
 ; Select the port mapping to use (or unselect all for use with external batch compile file)
@@ -141,6 +146,8 @@ P_			EQU 16	; X  X  RC MA CC MB MC X     X  Cc Bc Ac Cp Bp Ap X
 ;ESCNO EQU N_
 ;ESCNO EQU O_
 ;ESCNO EQU P_
+;ESCNO EQU Q_
+;ESCNO EQU R_
 
 ;**** **** **** **** ****
 ; Select the MCU type (or unselect for use with external batch compile file)
@@ -215,6 +222,14 @@ ENDIF
 
 IF ESCNO == P_
 $include (P.inc)	; Select pinout P
+ENDIF
+
+IF ESCNO == Q_
+$include (Q.inc)	; Select pinout Q
+ENDIF
+
+IF ESCNO == R_
+$include (R.inc)	; Select pinout R
 ENDIF
 
 
@@ -435,7 +450,7 @@ Temp_Storage:				DS	48		; Temporary storage
 ;**** **** **** **** ****
 CSEG AT 1A00h            ; "Eeprom" segment
 EEPROM_FW_MAIN_REVISION		EQU	16		; Main revision of the firmware
-EEPROM_FW_SUB_REVISION		EQU	51		; Sub revision of the firmware
+EEPROM_FW_SUB_REVISION		EQU	65		; Sub revision of the firmware
 EEPROM_LAYOUT_REVISION		EQU	33		; Revision of the EEPROM layout
 
 Eep_FW_Main_Revision:		DB	EEPROM_FW_MAIN_REVISION			; EEPROM firmware main revision number
@@ -484,7 +499,7 @@ Eep_Pgm_LED_Control:		DB	DEFAULT_PGM_LED_CONTROL			; EEPROM copy of programmed L
 Eep_Dummy:				DB	0FFh							; EEPROM address for safety reason
 
 CSEG AT 1A60h
-Eep_Name:					DB	"16.51_StartTones"				; Name tag (16 Bytes
+Eep_Name:					DB	"16.65_Tones     "				; Name tag (16 Bytes)
 
 ;**** **** **** **** ****
 Interrupt_Table_Definition		; SiLabs interrupts
@@ -841,16 +856,34 @@ IF MCU_48MHZ == 1
 	ajmp	t2_int_exit
 
 t2_int_start:
-	mov	Skip_T2_Int, #1			; Skip next interrupt
+	mov	Skip_T2_Int, #1		 	; Skip next interrupt
 ENDIF
 	; Update RC pulse timeout counter 
-	mov	A, Rcp_Timeout_Cntd			; RC pulse timeout count zero?
-	jz	t2_int_exit				; Yes - do not decrement
+	mov	A, Rcp_Timeout_Cntd	; RC pulse timeout count zero?
+	jz	($+4)								; Yes - do not decrement
+	
+	dec	Rcp_Timeout_Cntd		; No decrement		
+	
+	; Check RC pulse against stop value
+	clr	C
+	mov	A, New_Rcp					; Load new pulse value
+	jz	t2_int_rcp_stop			; Check if pulse is below stop value
+	
+	; RC pulse higher than stop value, reset stop counter
+	mov	Rcp_Stop_Cnt, #0		; Reset rcp stop counter
+	ajmp	t2_int_exit
 
-	dec	Rcp_Timeout_Cntd			; No decrement
+t2_int_rcp_stop:
+	; RC pulse less than stop value
+	mov	A, Rcp_Stop_Cnt			; Increment stop counter
+	add	A, #1
+	mov	Rcp_Stop_Cnt, A
+	jnc	($+5)								; Branch if counter has not wrapped
+
+	mov	Rcp_Stop_Cnt, #0FFh	; Set stop counter to max
 
 t2_int_exit:
-	pop	ACC				; Restore preserved registers
+	pop	ACC									; Restore preserved registers	
 	pop	PSW
 	reti
 
@@ -1283,7 +1316,14 @@ ENDIF
 
 int0_int_pulse_ready:
 	mov	New_Rcp, Temp1					; Store new pulse length
-	setb	Flags2.RCP_UPDATED		 		; Set updated flag
+	setb	Flags2.RCP_UPDATED		; Set updated flag
+	; Check if zero
+	mov	A, Temp1								; Load new pulse value
+	
+	jz	($+5)										; Check if pulse is zero
+	
+	mov	Rcp_Stop_Cnt, #0				; Reset rcp stop counter
+
 	; Set pwm limit
 	clr	C
 	mov	A, Pwm_Limit					; Limit to the smallest
@@ -1469,24 +1509,6 @@ ENDIF
 	jnb	Flags2.RCP_DSHOT, ($+5)
 	setb	IE_EX1					; Enable int1 interrupts (DShot only)
 	anl	EIE1, #0EFh				; Disable pca interrupts
-	; Check RC pulse against stop value
-	clr	C
-	mov	A, New_Rcp				; Load new pulse value
-	subb	A, #1					; Check if pulse is below stop value
-	jc	pca_int_rcp_stop
-
-	; RC pulse higher than stop value, reset stop counter
-	mov	Rcp_Stop_Cnt, #0			; Reset rcp stop counter
-	ajmp	pca_int_exit
-
-pca_int_rcp_stop:
-	; RC pulse less than stop value
-	mov	A, Rcp_Stop_Cnt			; Increment stop counter
-	add	A, #1
-	mov	Rcp_Stop_Cnt, A
-	jnc	($+5)					; Branch if counter has not wrapped
-
-	mov	Rcp_Stop_Cnt, #0FFh			; Set stop counter to max
 
 pca_int_exit:
 	Clear_COVF_Interrupt
@@ -1549,7 +1571,7 @@ waitxms_m:	; Middle loop
 ;
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 set_pwm_limit_low_rpm:
-	; Set pwm limit and demag disable for low rpms
+	; Set pwm limit 
 	mov	Temp1, #0FFh					; Default full power
 	jb	Flags1.STARTUP_PHASE, set_pwm_limit_low_rpm_exit	; Exit if startup phase set
 
@@ -2461,7 +2483,7 @@ comp_read_wrong:
 	inc	Temp1					; Increment number of OK readings required
 	clr	C
 	mov	A, Temp1
-	subb	A, Temp2					; If above initial requirement - go back and restart
+	subb	A, Temp2					; If above initial requirement - do not increment further
 	jc	($+3)
 	dec	Temp1
 
@@ -2694,8 +2716,8 @@ comm2comm3:
 
 	clr 	IE_EA				; Disable all interrupts
 	CpwmFET_off				; Turn off pwmfet
-	Set_Pwm_B
-	AcomFET_on				; To reapply power after a demag cut
+	Set_Pwm_B					; To reapply power after a demag cut
+	AcomFET_on				
 	setb	IE_EA
 	Set_Comp_Phase_C 			; Set comparator phase
 	ajmp	comm_exit
@@ -2703,8 +2725,8 @@ comm2comm3:
 comm23_rev:
 	clr 	IE_EA				; Disable all interrupts
 	ApwmFET_off				; Turn off pwmfet (reverse)
-	Set_Pwm_B
-	CcomFET_on				; To reapply power after a demag cut
+	Set_Pwm_B					; To reapply power after a demag cut
+	CcomFET_on				
 	setb	IE_EA
 	Set_Comp_Phase_A 			; Set comparator phase (reverse)
 	ajmp	comm_exit
@@ -3678,10 +3700,35 @@ IDbeep_loop:
 	call wait100ms
 	pop ACC
 	djnz	ACC, IDbeep_loop
-
 ret
-	
-	
+
+Arm_beep:
+jnb Flags2.RCP_DSHOT, Armed_Beep
+mov	A, DShot_Frame_Length_Thr   ; 20=Dshot600 40=Dshot300 80=Dshot150
+clr C
+subb A, #30
+jc ID_Dshot600
+subb A, #30
+jc ID_Dshot300
+jmp Armed_Beep
+
+ID_Dshot300:
+call beep_f3
+call beep_f3
+jmp Armed_Beep
+
+ID_Dshot600:
+call beep_f2
+call beep_f2
+call wait100ms
+call beep_f3
+call beep_f3
+Armed_Beep:
+call wait100ms
+call beep_f4
+call beep_f4
+ret
+
 
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
 ;**** **** **** **** **** **** **** **** **** **** **** **** ****
@@ -3704,11 +3751,9 @@ pgm_start:
 	mov	SP, #0c0h			; Stack = 64 upper bytes of RAM
 	; Initialize VDD monitor
 	orl	VDM0CN, #080h    	; Enable the VDD monitor
-IF ONE_S_CAPABLE == 0		
+	
 	mov 	RSTSRC, #06h   	; Set missing clock and VDD monitor as a reset source if not 1S capable
-ELSE
-	mov 	RSTSRC, #04h   	; Do not set VDD monitor as a reset source for 1S ESCSs, in order to avoid resets due to it
-ENDIF
+
 	; Set clock frequency
 	mov	CLKSEL, #00h		; Set clock divider to 1
 	; Switch power off
@@ -4080,25 +4125,6 @@ ENDIF
 	jnc	($+4)
 	ajmp	validate_rcp_start
 
-	; Setup timers for Multishot
-	mov	IT01CF, #RTX_PIN	; Route RCP input to INT0
-	mov	TCON, #11h		; Timer 0 run and INT0 edge triggered
-	mov	CKCON0, #04h		; Timer 0 clock is system clock
-	mov	TMOD, #09h		; Timer 0 set to 16bits and gated by INT0
-	; Setup interrupts for Multishot
-	setb	IE_ET0			; Enable timer 0 interrupts
-	clr	IE_ET1			; Disable timer 1 interrupts
-	clr	IE_EX1			; Disable int1 interrupts
-	; Test whether signal is Multishot
-	clr	Flags2.RCP_ONESHOT42
-	setb	Flags2.RCP_MULTISHOT			; Set Multishot flag
-	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
-	call wait100ms						; Wait for new RC pulse
-	clr	C
-	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
-	subb	A, #10
-	jc	validate_rcp_start
-
 	; Setup timers for DShot
 	mov	IT01CF, #(80h+(RTX_PIN SHL 4)+(RTX_PIN))	; Route RCP input to INT0/1, with INT1 inverted
 	mov	TCON, #51h		; Timer 0/1 run and INT0 edge triggered
@@ -4119,9 +4145,9 @@ ENDIF
 	mov	DShot_Pwm_Thr, #20				; Load DShot qualification pwm threshold (for DShot150)
 	mov	DShot_Frame_Length_Thr, #80		; Load DShot frame length criteria
 	; Test whether signal is DShot150
-	clr	Flags2.RCP_MULTISHOT
+	clr	Flags2.RCP_ONESHOT42
 	setb	Flags2.RCP_DSHOT
-	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	mov	Rcp_Outside_Range_Cnt, #10		; set out of range counter
 	call wait100ms						; Wait for new RC pulse
 	mov	DShot_Pwm_Thr, #16				; Load DShot regular pwm threshold
 	clr	C
@@ -4139,7 +4165,7 @@ ENDIF
 	mov	DShot_Pwm_Thr, #40				; Load DShot qualification pwm threshold (for DShot300)
 	mov	DShot_Frame_Length_Thr, #40		; Load DShot frame length criteria
 	; Test whether signal is DShot300
-	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	mov	Rcp_Outside_Range_Cnt, #10		; set out of range counter
 	call wait100ms						; Wait for new RC pulse
 	mov	DShot_Pwm_Thr, #32				; Load DShot regular pwm threshold
 	clr	C
@@ -4157,11 +4183,30 @@ ENDIF
 	mov	DShot_Pwm_Thr, #20				; Load DShot qualification pwm threshold (for DShot600)
 	mov	DShot_Frame_Length_Thr, #20		; Load DShot frame length criteria
 	; Test whether signal is DShot600
-	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	mov	Rcp_Outside_Range_Cnt, #10		; set out of range counter
 	call wait100ms						; Wait for new RC pulse
 	mov	DShot_Pwm_Thr, #16				; Load DShot regular pwm threshold
 	clr	C
 	mov	A, Rcp_Outside_Range_Cnt			; Check if pulses were accepted
+	subb	A, #10
+	jc	validate_rcp_start
+
+	; Setup timers for Multishot
+	mov	IT01CF, #RTX_PIN	; Route RCP input to INT0
+	mov	TCON, #11h		; Timer 0 run and INT0 edge triggered
+	mov	CKCON0, #04h		; Timer 0 clock is system clock
+	mov	TMOD, #09h		; Timer 0 set to 16bits and gated by INT0
+	; Setup interrupts for Multishot
+	setb	IE_ET0			; Enable timer 0 interrupts
+	clr	IE_ET1			; Disable timer 1 interrupts
+	clr	IE_EX1			; Disable int1 interrupts
+	; Test whether signal is Multishot
+	clr	Flags2.RCP_DSHOT
+	setb	Flags2.RCP_MULTISHOT			; Set Multishot flag
+	mov	Rcp_Outside_Range_Cnt, #0		; Reset out of range counter
+	call wait100ms						; Wait for new RC pulse
+	clr	C
+	mov	A, Rcp_Outside_Range_Cnt			; Check how many pulses were outside normal range ("900-2235us")
 	subb	A, #10
 	jc	validate_rcp_start
 
@@ -4308,10 +4353,11 @@ arm_end_beep:
 	; Beep arm sequence end signal
 	clr 	IE_EA				; Disable all interrupts
 	Clear_LED_1
-	call wait30ms	
+	call wait100ms	
+	call Arm_beep
+;	call beep_f4				; Signal that rcpulse is ready
+;	call beep_f4
 	Set_LED_2
-	call beep_f4				; Signal that rcpulse is ready
-	call beep_f4
 	setb	IE_EA				; Enable all interrupts
 	call wait200ms
 
@@ -4596,7 +4642,7 @@ normal_run_check_startup_rot:
 	jc	($+5)
 
 	ljmp	run1						; Continue to run 
-
+	jb	Flags3.PGM_BIDIR, initial_run_phase_done	; Check if bidirectional operation
 	jmp	run_to_wait_for_power_on
 
 initial_run_phase_done:
